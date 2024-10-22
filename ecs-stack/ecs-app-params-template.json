@@ -1,0 +1,30 @@
+[
+        {
+                "ParameterKey": "ECRRepo",
+		"ParameterValue": ""
+	},
+        {
+                "ParameterKey": "ECRRepoName",
+		"ParameterValue": ""
+	},
+	{
+		"ParameterKey": "KeyPair",
+		"ParameterValue": ""
+	},
+	{
+		"ParameterKey": "AppVPC",
+		"ParameterValue": ""
+	},
+	{
+		"ParameterKey": "AppSubnet",
+		"ParameterValue": ""
+	},
+	{
+		"ParameterKey": "AllowedCidr",
+		"ParameterValue": ""
+	},
+	{
+		"ParameterKey": "ElasticIPAlloc",
+		"ParameterValue": ""
+	}
+]
