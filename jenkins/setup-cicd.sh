@@ -156,8 +156,8 @@ if [[ "$UPDATE_README" == "1" ]]; then
 fi
 
 ################ FortiDevSec Setup
-if [[ "$SETUP_FDS" == "1" ]]; then
-   TOKEN=$(cat ~/fds-token.txt)
+TOKEN=$(cat ~/fds-token.txt)
+if [[ "$SETUP_FDS" == "1" ]] && [[ -z "$TOKEN" ]]; then
    
    ORG_ID=$(curl -X GET "https://fortidevsec.forticloud.com/api/v1/dashboard/get_orgs" \
        -H "Authorization: Bearer $TOKEN" \
@@ -168,9 +168,14 @@ if [[ "$SETUP_FDS" == "1" ]]; then
        -H "Content-Type: application/json" | jq -r '.app_uuid')
 
    update_tree_array "fdevsec.yaml" "<insert app id here>" "$FDS_APP_ID"
-fi
-[[ "$?" == "0" ]] && echo "FortiDevSec application setup successfully."
 
+   [[ "$?" == "0" ]] && echo "FortiDevSec application setup successfully."
+
+elif [[ -z "$TOKEN" ]]; then
+
+   echo "FortiDevSec token not found, couldn't set up application. Please ensure the token resides locally in a file at ~/fds-token.txt."
+
+fi
 
 ################ Add colaborators
 for collab in "${COLLABS[@]}"
@@ -180,7 +185,7 @@ do
 done
 
 ################ Jenkins setup
-if [[ "$JENKINS_PIPE" == "1" ]]; then
+if [[ "$JENKINS_PIPE" == "1" ]] && [[ -f ~/jenkins-cli.jar ]] && [[ ~/.jenkins-cli ]]; then
 
   update_tree_array "Jenkinsfile" "when { expression { false } }" "when { expression { true } }"
 
@@ -211,9 +216,11 @@ if [[ "$JENKINS_PIPE" == "1" ]]; then
   ############## Run initial manual build of repo in Jenkins
   java -jar ~/jenkins-cli.jar -s https://jenkins.fortinetcloudcse.com:8443/ -auth $JENKINS_USER_ID:$(cat ~/.jenkins-cli) build "$REPO_NAME"
   [[ "$?" == "0" ]] || echo "Error triggering first pipeline build..."
-  
-  echo "Create FortiDevSec app and paste app id into fdevsec.yaml."
 
+elif [[ "$JENKINS_PIPE" == "1" ]]; then
+  
+  echo "Please ensure the Jenkins CLI JAR file is at ~/jenkins-cli.jar and your user token is at ~/.jenkins-cli."
+  
 fi
 
 ################ Create Git tree with updated files
