@@ -8,8 +8,16 @@
 		"ParameterValue": ""
 	},
 	{
+		"ParameterKey": "SubnetId",
+		"ParameterValue": ""
+	},
+	{
 		"ParameterKey": "KeyPair",
 		"ParameterValue": ""
+	},
+	{
+		"ParameterKey": "InstanceType",
+		"ParameterValue": "t3.large"
 	},
 	{
 		"ParameterKey": "HashCheck",
@@ -26,5 +34,9 @@
 	{
 		"ParameterKey": "RunnerVersion",
 		"ParameterValue": ""
+	},
+	{
+		"ParameterKey": "RootVolumeSize",
+		"ParameterValue": "50"
 	}
 ]
