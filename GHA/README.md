@@ -104,6 +104,8 @@ aws cloudformation create-stack --stack-name <stack-name> \
 
 - Stack outputs expose `RunnerInstanceId`, `RunnerIamRoleArn`, and `RunnerSecurityGroupId` for downstream automation.
 
+- The instance configures a `github-actions-runner` systemd service running as `runner-user`. Use Session Manager to check status (`sudo systemctl status github-actions-runner`) or view logs (`journalctl -u github-actions-runner`).
+
 - The EC2 instance uses AWS Systems Manager Session Manager for access—no inbound security group rules are opened by default.
 
 * To let the runner interact with an Amazon EKS cluster, note the runner role ARN from the CloudFormation outputs and run:

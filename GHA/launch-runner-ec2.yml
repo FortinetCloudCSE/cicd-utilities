@@ -89,8 +89,8 @@ Resources:
           yum update -y
           yum install -y python3 python3-pip docker git jq yum-utils libicu
           yum install -y https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_amd64/amazon-ssm-agent.rpm
-          systemctl enable amazon-ssm-agent
-          systemctl start amazon-ssm-agent
+          systemctl enable amazon-ssm-agent >/dev/null 2>&1 || true
+          systemctl restart amazon-ssm-agent
           yum-config-manager --add-repo https://rpm.releases.hashicorp.com/AmazonLinux/hashicorp.repo
           yum install -y terraform
           pip3 install cfn-lint
@@ -106,10 +106,31 @@ Resources:
           tar xzf /tmp/actions-runner-linux-x64-${RunnerVersion}.tar.gz -C /tmp/actions-runner
           mv /tmp/actions-runner /home/runner-user/
           chown runner-user:runner-user -R /home/runner-user
-          su -c 'cd /home/runner-user/actions-runner && ./config.sh --url https://github.com/${OrgName}/${RepoName} --token ${GHAToken} --unattended' runner-user
-          cd /home/runner-user/actions-runner
-          ./svc.sh install runner-user
-          ./svc.sh start
+          rm -f /tmp/actions-runner-linux-x64-${RunnerVersion}.tar.gz
+          su -c 'cd /home/runner-user/actions-runner && ./config.sh --url https://github.com/${OrgName}/${RepoName} --token ${GHAToken} --unattended --replace' runner-user
+          cat <<EOF >/etc/systemd/system/github-actions-runner.service
+[Unit]
+Description=GitHub Actions Runner for ${OrgName}/${RepoName}
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=runner-user
+Group=runner-user
+WorkingDirectory=/home/runner-user/actions-runner
+ExecStart=/home/runner-user/actions-runner/run.sh
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+SuccessExitStatus=0 2
+
+[Install]
+WantedBy=multi-user.target
+EOF
+          systemctl daemon-reload
+          systemctl enable github-actions-runner
+          systemctl start github-actions-runner
       Tags:
         - Key: Name
           Value: !Sub "GHArunner - ${AWS::StackName}"
