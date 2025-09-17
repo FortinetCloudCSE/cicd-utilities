@@ -8,8 +8,16 @@
 		"ParameterValue": "A4H44SAMPLETOKEN"
 	},
 	{
+		"ParameterKey": "SubnetId",
+		"ParameterValue": "subnet-0123456789abcdef0"
+	},
+	{
 		"ParameterKey": "KeyPair",
 		"ParameterValue": "my-key-pair"
+	},
+	{
+		"ParameterKey": "InstanceType",
+		"ParameterValue": "t3.large"
 	},
 	{
 		"ParameterKey": "HashCheck",
@@ -26,5 +34,9 @@
 	{
 		"ParameterKey": "RunnerVersion",
 		"ParameterValue": "2.307.1"
+	},
+	{
+		"ParameterKey": "RootVolumeSize",
+		"ParameterValue": "50"
 	}
 ]

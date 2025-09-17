@@ -4,19 +4,33 @@ Parameters:
     Type: String
   GHAToken:
     Type: String
-  KeyPair:
+    NoEcho: true
+    Description: Short-lived registration token from the GitHub runner setup wizard
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+  InstanceType:
     Type: String
+    Default: t3.large
+  RootVolumeSize:
+    Type: Number
+    Default: 50
+    MinValue: 20
+    MaxValue: 200
+  KeyPair:
+    Type: AWS::EC2::KeyPair::KeyName
   LatestAmiId:
     Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
-    Default: '/aws/service/ami-amazon-linux-latest/al2023-ami-minimal-kernel-default-x86_64'
+    Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
   HashCheck:
     Type: String
+    AllowedPattern: '^[A-Fa-f0-9]{64}$'
   OrgName:
     Type: String
   RepoName:
     Type: String
   RunnerVersion:
     Type: String
+    AllowedPattern: '^[0-9]+\.[0-9]+\.[0-9]+$'
 
 Resources:
   EC2RunnerAdminRole:
@@ -42,14 +56,9 @@ Resources:
   RunnerSG:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Outbound HTTPS all allow
+      GroupDescription: Outbound web access for GitHub runner
       VpcId: !Ref VPCtoUse
       SecurityGroupEgress:
-      - CidrIp: 0.0.0.0/0
-        FromPort: 0
-        IpProtocol: tcp
-        ToPort: 65535
-      SecurityGroupIngress:
       - CidrIp: 0.0.0.0/0
         FromPort: 443
         IpProtocol: tcp
@@ -62,42 +71,77 @@ Resources:
     Type: AWS::EC2::Instance
     Properties:
       KeyName: !Ref KeyPair
-      InstanceType: t3.large
-      AvailabilityZone: !Sub '${AWS::Region}a'
+      InstanceType: !Ref InstanceType
+      SubnetId: !Ref SubnetId
       ImageId: !Ref LatestAmiId
       IamInstanceProfile: !Ref SSMRoleProfile
       SecurityGroupIds:
         - !Ref RunnerSG
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: !Ref RootVolumeSize
+            VolumeType: gp3
+            DeleteOnTermination: true
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash -xe
-          yum update -y && yum upgrade -y
+          yum update -y
           yum install -y python3 python3-pip docker git jq yum-utils libicu
           yum install -y https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_amd64/amazon-ssm-agent.rpm
-          systemctl enable amazon-ssm-agent
-          systemctl start amazon-ssm-agent
+          systemctl enable amazon-ssm-agent >/dev/null 2>&1 || true
+          systemctl restart amazon-ssm-agent
           yum-config-manager --add-repo https://rpm.releases.hashicorp.com/AmazonLinux/hashicorp.repo
           yum install -y terraform
           pip3 install cfn-lint
+          systemctl enable docker
           systemctl start docker
-          useradd -m -G docker runner-user
+          id -u runner-user >/dev/null 2>&1 || useradd -m -G docker runner-user
           curl -O https://s3.us-west-2.amazonaws.com/amazon-eks/1.28.5/2024-01-04/bin/linux/amd64/kubectl
-          chmod +x ./kubectl
-          mv kubectl /usr/bin/          
+          install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+          rm -f kubectl
           curl -o /tmp/actions-runner-linux-x64-${RunnerVersion}.tar.gz -L https://github.com/actions/runner/releases/download/v${RunnerVersion}/actions-runner-linux-x64-${RunnerVersion}.tar.gz
-          echo "${HashCheck} /tmp/actions-runner-linux-x64-${RunnerVersion}.tar.gz" | sha256sum -c || echo "Hash check failed."
+          echo "${HashCheck} /tmp/actions-runner-linux-x64-${RunnerVersion}.tar.gz" | sha256sum -c
           mkdir -p /tmp/actions-runner
           tar xzf /tmp/actions-runner-linux-x64-${RunnerVersion}.tar.gz -C /tmp/actions-runner
           mv /tmp/actions-runner /home/runner-user/
           chown runner-user:runner-user -R /home/runner-user
-          cat <<EOF >> /var/lib/cloud/scripts/per-boot/test.sh
-          #!/bin/bash
-          systemctl start docker
-          su -c 'sh /home/runner-user/actions-runner/run.sh' runner-user
+          rm -f /tmp/actions-runner-linux-x64-${RunnerVersion}.tar.gz
+          su -c 'cd /home/runner-user/actions-runner && ./config.sh --url https://github.com/${OrgName}/${RepoName} --token ${GHAToken} --unattended --replace' runner-user
+          cat <<EOF >/etc/systemd/system/github-actions-runner.service
+          [Unit]
+          Description=GitHub Actions Runner for ${OrgName}/${RepoName}
+          After=network-online.target
+          Wants=network-online.target
+          
+          [Service]
+          Type=simple
+          User=runner-user
+          Group=runner-user
+          WorkingDirectory=/home/runner-user/actions-runner
+          ExecStart=/home/runner-user/actions-runner/run.sh
+          Restart=always
+          RestartSec=5
+          KillSignal=SIGINT
+          SuccessExitStatus=0 2
+          
+          [Install]
+          WantedBy=multi-user.target
           EOF
-          chmod 755 /var/lib/cloud/scripts/per-boot/test.sh
-          su -c 'sh /home/runner-user/actions-runner/config.sh --url https://github.com/${OrgName}/${RepoName} --token ${GHAToken}' runner-user
-          su -c 'sh /home/runner-user/actions-runner/run.sh' runner-user 
+          systemctl daemon-reload
+          systemctl enable github-actions-runner
+          systemctl start github-actions-runner
       Tags:
         - Key: Name
           Value: !Sub "GHArunner - ${AWS::StackName}"
+
+Outputs:
+  RunnerInstanceId:
+    Description: EC2 instance hosting the GitHub Actions runner
+    Value: !Ref EC2Runner
+  RunnerIamRoleArn:
+    Description: IAM role attached to the runner instance
+    Value: !GetAtt EC2RunnerAdminRole.Arn
+  RunnerSecurityGroupId:
+    Description: Security group protecting the runner instance
+    Value: !Ref RunnerSG

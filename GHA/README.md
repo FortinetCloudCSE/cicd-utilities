@@ -19,83 +19,97 @@ export AWS_DEFAULT_REGION=us-east-1 && export AWS_PROFILE=user-admin
 
 ### Parameters
 
-- In GitHub, click 'Settings'.
-
-- Click 'Actions' on the left sidebar. On the dropdown, click 'Runners'.
-
-- At the top right of the page, click 'New Self-hosted Runner.'
-
-- Under 'Runner Image', Select 'Linux'.
-
-- There are several pieces of information on this page that you'll need to paste into the launch-runner-params.yaml file.
-
-  * VPCtoUse: Any pre-existing VPC in your AWS account. 
-  * KeyPair: The name of a key pair in your AWS account.
-  * For OrgName and RepoName, these can be found in the URL of your GitHub Repo. i.e. https://github.com/OrgName/RepoName
-  * RunnerVersion, GHAToken, and HashCheck can be found in the Download and Configure Sections of the Create Runner page, as shown below (red, blue, and green boxes, respectively).
+- In GitHub, click **Settings → Actions → Runners → New self-hosted runner** and select the Linux image.
+- Populate `launch-runner-params.json` with the following values (keep secrets out of version control):
+  * `VPCtoUse`: An existing VPC.
+  * `SubnetId`: A private subnet in the VPC with internet egress (NAT Gateway or Internet Gateway).
+  * `KeyPair`: Existing EC2 key pair name for break-glass SSH access.
+  * `InstanceType`: Defaults to `t3.large`; adjust for your workload profile.
+  * `RootVolumeSize`: Root disk size in GiB (default 50).
+  * `OrgName` and `RepoName`: From the GitHub URL (`https://github.com/<Org>/<Repo>`).
+  * `RunnerVersion`: From the GitHub runner download section (for example `2.307.1` as in red box in example below).
+  * `GHAToken`: A registration token generated in the GitHub wizard. Tokens expire after 60 minutes—store them in AWS Systems Manager Parameter Store (SecureString) or fetch just-in-time when you deploy. (Purple box in example below.)
+  * `HashCheck`: SHA-256 hash from the runner release asset page; ensures the download is trusted. (Green box in example below.)
 
   !["Create Runner"](runner-setup.png)
  
-  * Note: You can also retrieve a token via the GitHub api if you have it installed:
-    ```
-    > gh auth login
-    > gh api \
-        --method POST \
-        -H "Accept: application/vnd.github+json" \
-        -H "X-GitHub-Api-Version: 2022-11-28" \
-        /repos/<Repo owner or organization>/<Repo name>/actions/runners/registration-token | jq -r .token
-    ```
+  GitHub CLI alternative for obtaining a registration token:
 
-  * When finished, after pasting in the values, your launch-runner-params.yaml file should look like this example:
+  ```
+  gh auth login
+  gh api \
+    --method POST \
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    /repos/<repo owner or organization>/<repo name>/actions/runners/registration-token | jq -r .token
+  ```
+
+  Example `launch-runner-params.json`:
 
 ```
 [
-    {        
-         "ParameterKey": "VPCtoUse",
-         "ParameterValue": "vpc-abcd1234"
+    {
+        "ParameterKey": "VPCtoUse",
+        "ParameterValue": "vpc-abcd1234"
     },
     {
-         "ParameterKey": "GHAToken",
-         "ParameterValue": "A4H44WZT5RK4EOBUG5FZV2TEKKN4W"
+        "ParameterKey": "GHAToken",
+        "ParameterValue": "A4H44WZT5RK4EOBUG5FZV2TEKKN4W"
     },
     {
-         "ParameterKey": "KeyPair",
-         "ParameterValue": "MyKeyPair"
+        "ParameterKey": "SubnetId",
+        "ParameterValue": "subnet-0123456789abcdef0"
     },
     {
-         "ParameterKey": "HashCheck",
-         "ParameterValue": "292e8770bdeafca135c2c06cd5426f9dda49a775568f45fcc25cc2b576afc12f"
+        "ParameterKey": "KeyPair",
+        "ParameterValue": "MyKeyPair"
     },
     {
-         "ParameterKey": "OrgName",
-         "ParameterValue": "MyOrg"
+        "ParameterKey": "InstanceType",
+        "ParameterValue": "t3.large"
     },
     {
-         "ParameterKey": "RepoName",
-         "ParameterValue": "MyRepo"
+        "ParameterKey": "HashCheck",
+        "ParameterValue": "292e8770bdeafca135c2c06cd5426f9dda49a775568f45fcc25cc2b576afc12f"
     },
     {
-         "ParameterKey": "RunnerVersion",
-         "ParameterValue": "2.304.0"
+        "ParameterKey": "OrgName",
+        "ParameterValue": "MyOrg"
+    },
+    {
+        "ParameterKey": "RepoName",
+        "ParameterValue": "MyRepo"
+    },
+    {
+        "ParameterKey": "RunnerVersion",
+        "ParameterValue": "2.307.1"
+    },
+    {
+        "ParameterKey": "RootVolumeSize",
+        "ParameterValue": "50"
     }
 ]
 ```
-- Now, issue the following command to launch the CloudFormation Stack:
+- Launch the CloudFormation stack:
 
 ```
-aws cloudformation create-stack --stack-name <enter a name for your stack here> \
-   --template-body file://./launch-runner-ec2.yml --parameters file://./launch-runner-params.json \ 
-   --capabilities CAPABILITY_NAMED_IAM
+aws cloudformation create-stack --stack-name <stack-name> \
+  --template-body file://./launch-runner-ec2.yml \
+  --parameters file://./launch-runner-params.json \
+  --capabilities CAPABILITY_NAMED_IAM
 ```
-- You will see a generated stack ID if the command was executed successfully. You can monitor the status of the stack as it's being built in the CloudFormation console. Once complete, you will see the runner listed on the 'Runners' page as below. 
+- Monitor the stack in the CloudFormation console. When provisioning finishes, the runner appears on the GitHub Actions **Runners** page.
 
   ![Runner Complete](runner-complete.png)
 
-- Also note that the EC2 instance is launched with permissions enabling connection via Session Manager for any required troubleshooting or modifications.
+- Stack outputs expose `RunnerInstanceId`, `RunnerIamRoleArn`, and `RunnerSecurityGroupId` for downstream automation.
 
-* To enable the runner to perform operations on a Kubernetes cluster, identify the ARN of the role attached to the EC2 instance hosting the runner and issue
-the following command:
+- The instance configures a `github-actions-runner` systemd service running as `runner-user`. Use Session Manager to check status (`sudo systemctl status github-actions-runner`) or view logs (`journalctl -u github-actions-runner`).
+
+- The EC2 instance uses AWS Systems Manager Session Manager for access—no inbound security group rules are opened by default.
+
+* To let the runner interact with an Amazon EKS cluster, note the runner role ARN from the CloudFormation outputs and run:
 
 ```
-eksctl create iamidentitymapping --cluster <Cluster Name> --region $AWS_DEFAULT_REGION --arn <Runner IAM Role ARN> --group system:masters --username admin
-``` 
+eksctl create iamidentitymapping --cluster <cluster name> --region $AWS_DEFAULT_REGION --arn <runner IAM role ARN> --group system:masters --username admin
+```
