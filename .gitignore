@@ -1,4 +1,5 @@
 GHA/launch-runner-params.json
 jenkins/config.xml
 launch-templates/jenkins-params.json
+status-check-lambda/*.zip
 *.txt

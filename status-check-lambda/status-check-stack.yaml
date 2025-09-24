@@ -1,0 +1,99 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: GitHub status check alert Lambda with SNS notifications and Function URL webhook endpoint.
+
+Parameters:
+  LambdaCodeS3Bucket:
+    Type: String
+    Description: S3 bucket that stores the Lambda deployment package.
+  LambdaCodeS3Key:
+    Type: String
+    Description: S3 key of the Lambda deployment package (zip file).
+  WebhookSecret:
+    Type: String
+    NoEcho: true
+    Description: Shared secret used to validate GitHub webhook signatures.
+  SnsTopicName:
+    Type: String
+    Default: status-check-alerts
+    Description: Name for the SNS topic that publishes status check failure notifications.
+  LogRetentionDays:
+    Type: Number
+    Default: 14
+    MinValue: 1
+    Description: CloudWatch Logs retention period (days) for the Lambda function.
+
+Resources:
+  StatusCheckTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Ref SnsTopicName
+
+  StatusCheckLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: PublishStatusAlerts
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref StatusCheckTopic
+
+  StatusCheckFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Publishes SNS notifications when ci/jenkins/build-status checks fail.
+      Handler: status-check-email.handler
+      Runtime: python3.11
+      Timeout: 30
+      MemorySize: 256
+      Role: !GetAtt StatusCheckLambdaRole.Arn
+      Code:
+        S3Bucket: !Ref LambdaCodeS3Bucket
+        S3Key: !Ref LambdaCodeS3Key
+      Environment:
+        Variables:
+          SNS_TOPIC_ARN: !Ref StatusCheckTopic
+          WEBHOOK_SECRET: !Ref WebhookSecret
+
+  StatusCheckLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${StatusCheckFunction}"
+      RetentionInDays: !Ref LogRetentionDays
+    DependsOn: StatusCheckFunction
+
+  StatusCheckFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      AuthType: NONE
+      TargetFunctionArn: !Ref StatusCheckFunction
+
+  StatusCheckFunctionUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunctionUrl
+      FunctionName: !Ref StatusCheckFunction
+      Principal: "*"
+      FunctionUrlAuthType: NONE
+
+Outputs:
+  StatusCheckFunctionArn:
+    Description: ARN of the Lambda function that processes GitHub status checks.
+    Value: !GetAtt StatusCheckFunction.Arn
+  StatusCheckFunctionUrl:
+    Description: HTTPS endpoint to configure as the GitHub webhook target.
+    Value: !GetAtt StatusCheckFunctionUrl.FunctionUrl
+  StatusCheckTopicArn:
+    Description: SNS topic ARN that receives status check alerts.
+    Value: !Ref StatusCheckTopic
