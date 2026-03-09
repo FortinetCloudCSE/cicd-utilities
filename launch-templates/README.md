@@ -45,84 +45,18 @@ The main node of your cluster is now ready to be configured.
 
 ### HTTPS Setup
 
-To enforce Jenkins console access via HTTPS, there are a few additional steps you'll need to take. One of the more simple means of doing this involves [Let's Encrypt](https://letsencrypt.org/), a free and open CA. 
-
-First, access the main node EC2 instance once again via session manager, and at the ssm-user command line, install [certbot](https://certbot.eff.org/), a popular *Let's Encrypt* client, and create the certificates.
-
-```
-sudo yum install -y certbot
-sudo certbot certonly --standalone
-```
-
-You'll be prompted to enter your email address, accept the Let's Encrypt Terms of Service, and opt in or out of receiving emails from EFF. You'll also need to paste in the domain name at which your Jenkins node sits. Enter the complete domain name, including subdomains (i.e. jenkins.fortinetcloudcse.com).
-
-Once the certs are created, they'll be accessible at /etc/letsencrypt/live/\<the Jenkins domain name you configured\>/.
-
-We're going to copy everything over to a convenient location, but feel free to work in an alternate directory if you'd like.
-
-At this point, you'll need to create a passphrase for the eventual Jenkins keystore we'll be creating and store it in a file. We'll use it in steps leading up to the keystore creation.
-
-```
-sudo mkdir -p /var/lib/jenkins/.ssl
-sudo chown jenkins:jenkins /var/lib/jenkins/.ssl
-sudo cp /etc/letsencrypt/live/<Jenkins domain name>/* /var/lib/jenkins/.ssl  
-sudo su jenkins -s /bin/bash
-echo my-P@ssw0rd > /var/lib/jenkins/.ssl/passphrase.txt
-```
-
-Create the PKCS archive.
-
-```
-cd /var/lib/jenkins/.ssl
-openssl pkcs12 -export -out jenkins.p12 -passout 'file:passphrase.txt' -inkey privkey.pem -in fullchain.pem
-```
-
-Create the Jenkins keystore from the PKCS archive.
-
-```
-keytool -importkeystore -srckeystore jenkins.p12 \
-  -srcstorepass:file passphrase.txt -srcstoretype PKCS12 \
-  -destkeystore jenkins.jks -deststorepass:file passphrase.txt 
-```
-
-Copy the keystore to a location we'll be configuring (in systemd a few steps down) and adjust permissions. (To run these commands, you can exit the Jenkins user shell and run them as ssm-user without needing to set up a sudo password).
-
-```
-sudo mkdir -p /etc/jenkins
-sudo cp jenkins.jks /etc/jenkins
-sudo chown -R jenkins:jenkins /etc/jenkins
-sudo chmod 700 /etc/jenkins
-sudo chmod 600 /etc/jenkins/jenkins.jks
-```
-
-Create a Jenkins Systemd service override directory and file.
-
-```
-sudo mkdir -p /etc/systemd/system/jenkins.service.d
-sudo touch /etc/systemd/system/jenkins.service.d/override.conf
-sudo cat << EOF > /etc/systemd/system/jenkins.service.d/override.conf
-[Service]
-Environment="JENKINS_PORT=-1"
-Environment="JENKINS_HTTPS_PORT=8443"
-Environment="JENKINS_HTTPS_KEYSTORE=/etc/jenkins/jenkins.jks"
-Environment="JENKINS_HTTPS_KEYSTORE_PASSWORD=my-P@ssw0rd"
-Environment="JENKINS_HTTPS_LISTEN_ADDRESS=0.0.0.0"
-EOF
-```
-Finally, reload the Systemd manager configuration and restart the Jenkins service.
-
-```
-sudo systemctl daemon-reload
-sudo systemctl restart jenkins
-```
-
-You should now be able to open up a web browser and navigate to https://\<jenkins domain name\>:8443
+See **[docs/https-setup.md](docs/https-setup.md)** for full instructions, including:
+- Let's Encrypt certificate setup (recommended for instances with a public domain)
+- Certificate renewal
+- Self-signed certificate setup (for internal or testing use)
 
 ### Migrating to a new Jenkins Installation
 
 To utilize these templates to migrate an existing Jenkins installation to a new server, copy objects within the existing JENKINS_HOME and JENKINS_HTTPS_KEYSTORE locations to an S3 location and specify the S3 URI of each in the CloudFormation parameter template file as values for the JenkinsHomeS3Location and JenkinsKeyStoreLocation parameters, respectively. In order for the EC2 instance where your Jenkins Main node will be deployed to have permissions to download those objects from S3, ensure you also paste in the ARN of the bucket where these objects are located as a value for the JenkinsBucket parameter as well.
 
-Once you do launch the "JenkinsMainLaunchTemplate..." and it deploys successfully, your new Jenkins install will be ready to go and you can navigate to the public IP of the EC2 instance on port 8080 to access Jenkins. 
+Once you do launch the "JenkinsMainLaunchTemplate..." and it deploys successfully, your new Jenkins install will be ready to go and you can navigate to the public IP of the EC2 instance on port 8080 to access Jenkins.
+
+Update the Route 53 record for your Jenkins domain to point to the public IP of the new instance.
 
 If you'd like to enable https for the server, you'll need to access the ssm-user command line of the EC2 instance via session manager and update the Jenkins systemd service settings. The launch template user data is configured to copy the JENKINS_HTTPS_KEYSTORE from S3 to /etc/jenkins, so we're specifying that as the new keystore location here in this example as well. This method also assumes your new domain name matches the old one which the keystore is configured for.
 
@@ -189,9 +123,29 @@ Ensure the **Use TCP_NODELAY flag on the SSH connection** and **Private IP** box
 
 !["new-cloud-specs-3"](new-cloud-specs-3.png)
 
-You should now see a new instance creating in the AWS EC2 console. 
+Also set the following under the main cloud configuration:
+
+|                                          |     |
+| ---------------------------------------- | --- |
+| Maximum Init Connection Timeout in sec:  | 300 |
+| Cloud Status Interval in sec:            | 10  |
+
+You should now see a new instance creating in the AWS EC2 console.
 
 In Jenkins, you can also navigate to Dashboard > Manage Jenkins > Nodes, and you'll see the new node there with a name in the form of '\<cloud\> \<EC2 instance id\>'. It may take a few moments to become available.
 
 ### Integrating GitHub
 
+See **[docs/github-integration.md](docs/github-integration.md)** for full instructions, including:
+- GitHub PAT (Personal Access Token) setup for build status checks
+- Private repository deploy key setup
+
+---
+
+## Further Reading
+
+| Guide | Contents |
+| --- | --- |
+| [docs/https-setup.md](docs/https-setup.md) | Let's Encrypt new cert, cert renewal, self-signed cert alternative |
+| [docs/github-integration.md](docs/github-integration.md) | GitHub PAT for status checks, private repo deploy keys |
+| [docs/operations.md](docs/operations.md) | Jenkins upgrade procedure, git workspace troubleshooting |
