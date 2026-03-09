@@ -2,26 +2,24 @@
 #
 # Script for setting up github repo and (optionally) an accompanying jenkins pipeline.
 #
-# Usage: 
-# setup-cicd.sh [-t repo] [-r] [-b] [-s] [-j userid] [-f template-config.xml] [-c username1 -c username2 ... ] <name of new repo>
+# Usage:
+# setup-cicd.sh [-t repo] [-r] [-b] [-j userid] [-f template-config.xml] [-c username1 -c username2 ... ] <name of new repo>
 #   -t Name of template repository
 #   -r Update README with Workshop Pages link
 #   -b Apply branch protections
 #   -j Jenkins userid
-#   -s Setup FortiSevSec application
 #   -f Jenkins pipeline configuration xml file (if unset the default config file will be used)
 #   -c GitHub username of collaborator to add
 #
 # Note: This script assumes:
 #    * The Jenkins CLI is installed at ~/jenkins-cli.jar
 #    * A Jenkins personal access token is installed at ~/.jenkins-cli. The file should only contain the token on the first line of the file and nothing else.
-#    * A FortiDevSec API token is installed at ~/fds-token.txt. The file should only contain the token on the first line of the file and nothing else.
 
 
-while getopts 't:j:c:hf:srb' opt; do
+while getopts 't:j:c:hf:rb' opt; do
   case "${opt}" in
     t)
-      USE_TEMPLATE=1 
+      USE_TEMPLATE=1
       TEMPLATE_REPO_NAME="$OPTARG"
       ;;
     j)
@@ -38,20 +36,16 @@ while getopts 't:j:c:hf:srb' opt; do
     r)
       UPDATE_README=1
       ;;
-    s)
-      SETUP_FDS=1
-      ;;
     b)
       APPLY_BR_PROT=1
       ;;
     h)
-      echo "Usage: setup-cicd.sh [-t repo] [-r] [-s] [-b] [-j userid] [-f template-config.xml] [-c username1 -c username2 ... ] <name of new repo>"
+      echo "Usage: setup-cicd.sh [-t repo] [-r] [-b] [-j userid] [-f template-config.xml] [-c username1 -c username2 ... ] <name of new repo>"
       echo "-t Name of template repository"
       echo "-r Update README with Workshop Pages link"
       echo "-b Apply branch protections"
       echo "-j Jenkins userid"
       echo "-f Jenkins pipeline configuration xml file (if unset the default config file will be used)"
-      echo "-s Setup FortiDevSec application"
       echo "-c GitHub username of collaborator to add"
       exit 0
       ;;
@@ -153,28 +147,6 @@ if [[ "$UPDATE_README" == "1" ]]; then
   TREE_FIELDS+=("-f \"tree[][mode]=100644\"")
   TREE_FIELDS+=("-f \"tree[][type]=blob\"")
   TREE_FIELDS+=("-f \"tree[][sha]=$BLOB_SHA\"")
-fi
-
-################ FortiDevSec Setup
-TOKEN=$(cat ~/fds-token.txt)
-if [[ "$SETUP_FDS" == "1" ]] && [[ -z "$TOKEN" ]]; then
-   
-   ORG_ID=$(curl -X GET "https://fortidevsec.forticloud.com/api/v1/dashboard/get_orgs" \
-       -H "Authorization: Bearer $TOKEN" \
-       -H "Content-Type: application/json" | jq '.[0].id')
-   
-   FDS_APP_ID=$(curl -X POST "https://fortidevsec.forticloud.com/api/v1/dashboard/create_app?org_id=$ORG_ID&app_name=$REPO_NAME" \
-       -H "Authorization: Bearer $TOKEN" \
-       -H "Content-Type: application/json" | jq -r '.app_uuid')
-
-   update_tree_array "fdevsec.yaml" "<insert app id here>" "$FDS_APP_ID"
-
-   [[ "$?" == "0" ]] && echo "FortiDevSec application setup successfully."
-
-elif [[ -z "$TOKEN" ]]; then
-
-   echo "FortiDevSec token not found, couldn't set up application. Please ensure the token resides locally in a file at ~/fds-token.txt."
-
 fi
 
 ################ Add colaborators
